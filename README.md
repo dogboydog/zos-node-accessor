@@ -40,8 +40,10 @@ This accessor leverages z/OS FTP server to interact with z/OS, it requires `JESI
       * [Allocate dataset](#allocate-dataset)
       * [Copy dataset](#copy-dataset)
       * [Initiate HRECALL](#initiate-hrecall)
-  * [Query job status](#query-job-status)
+  * [Query job status](#query-job)
+  * [Get job status](#get-job-status)
   * [Get JES spool files](#get-jes-spool-files)
+  * [Delete job](#delete-job)
 
 ### Connection
 
@@ -62,7 +64,7 @@ Before connecting to a z/OS server, you need to initialize an instance using the
 
 ##### Return
 
-A promise that resolves itself(the connection to z/OS), and rejects on any error.
+A promise that resolves itself (the connection to z/OS), and rejects on any error.
 
 ##### Example
 
@@ -162,7 +164,7 @@ connection.uploadDataset(input, 'hosts')
 
 * dsn - _string_ -  Specify a full qualified dataset name, or USS file name. It **CAN NOT** contain any wildcard (*).
 * dataType - _string (default: 'ascii')_ -  Transfer data type, accepts three options `binary`,  `ascii`, `ascii_strip_eol`. When downloading an ascii dataset, dataType should be either `ascii` or `ascii_strip_eol` so that the FTP server converts `EBCDIC` characters to  `ASCII`, `ascii_strip_eol` tells FTP server not the append a CLRF to the end of each record.
-* stream - _boolean (default: false)_ -  `true` if you want to read a full dataset into memory (in Buffer), otherwise you get a [ReadableStream](https://nodejs.org/api/stream.html#stream_readable_streams).
+* stream - _boolean (default: false)_ -  `true` if you want to obtain a [ReadableStream](https://nodejs.org/api/stream.html#stream_readable_streams) of the data set content, or `false` to read a full dataset into memory (in Buffer).
 
 ##### Return
 
@@ -262,7 +264,7 @@ connection.listJobs('HIS*')
 ##### Parameter
 
 * JCLText - _string_ -  The raw JCL string to be submitted, or the name of built-in JCLs if `cfg` is specified.
-* cfg - _object_ - configurations to the JCL, if this parameter is specified, then JCLText should be a name of the built-in JCLs, and the `cfg` should contain paramters for that JCL. Following is a list of built-in JCLs and their supported configurations:
+* cfg - _object_ - configurations to the JCL, if this parameter is specified, then JCLText should be a name of the built-in JCLs, and the `cfg` should contain parameters for that JCL. Following is a list of built-in JCLs and their supported configurations:
 
     * <h6>Allocate dataset</h6>
 
@@ -321,9 +323,9 @@ connection.submitJCL('HRECALLW', {INPUT: 'AA.BB'})
   });
 ```
 
-#### Query job status
+#### Query job
 
-`queryJob(jobName, jobId)` -  Get job status identified by job name and job id.
+`queryJob(jobName, jobId)` -  Query job status identified by job name and job id. _(Deprecated, use `getJobStatus` for more details.)_
 
 ##### Parameter
 
@@ -343,7 +345,7 @@ A promise that resolves status of the job, it is one of the following values:
 ##### Example
 
 ```js
-connection.queryJCL(jobName, jobId)
+connection.queryJob(jobName, jobId)
   .then(function (status) {
       switch(status) {
           case connection.RC_SUCCESS:
@@ -364,26 +366,95 @@ connection.queryJCL(jobName, jobId)
   });
 ```
 
-#### Get JES spool files
+#### Get job status
 
-`getJobLog(jobName, jobId)` -  Get jes spool files identified by jobName and jobId.
+`getJobStatus(jobId)` -  Get job status specified by jobId.
 
 ##### Parameter
 
-* jobName - _string_ -  Name of the job.
 * jobId - _string_ -  Id of the job.
 
 ##### Return
 
-A promise that resolves spool files populated by the job.
+A promise that resolves job status
+```js
+  {
+   jobname: "HRECALLW",
+   jobid: "JOB06385",
+   owner: "USER",
+   status: "OUTPUT",
+   class: "A",
+   rc: 0,
+   spoolFiles: [
+          {
+           id: 2,
+           stepname: "JES2",
+           procstep: "N/A",
+           c: "H",
+           ddname: "JESJCL",
+           byteCount: 315
+         }
+   ]}
+```
 
 ##### Example
 
 ```js
-connection.getJobLog(jobName, jobId)
+connection.getJobStatus(jobId)
+  .then(function(jobStatus) {
+    console.log('Job status is:');
+    console.log(jobStatus);
+  })
+  .catch(function(err) {
+    // handle error
+  });
+```
+
+#### Get JES spool files
+
+`getJobLog(jobName, jobId)` - Get jes spool files identified by jobName and jobId.
+
+##### Parameter
+
+* jobName - _string_ -  Name of the job. **Default:** '*'
+* jobId - _string_ -  Id of the job.
+* spoolFileIndex - _string | integer_ - Index of the spool file to get. Number of spool files can be found using `getJobStatus`, specifying 'x' will return all spool files joined with the `!! END OF JES SPOOL FILE !!`. **Default:** 'x'
+
+##### Return
+
+A promise that resolves spool files populated by the job
+
+##### Example
+
+```js
+connection.getJobLog(jobName, jobId, 'x')
   .then(function(jobLog) {
     console.log('Job id is:');
     console.log(jobLog);
+  })
+  .catch(function(err) {
+    // handle error
+  });
+```
+
+#### Delete job
+
+`deleteJob(jobId)` - Purge/delete job by job id.
+
+##### Parameter
+
+* jobId - _string_ -  Id of the job.
+
+##### Return
+
+A promise that resolves on success, rejects on error.
+
+##### Example
+
+```js
+connection.deleteJob('JOB25186')
+  .then(function() {
+    console.log('Deleted');
   })
   .catch(function(err) {
     // handle error

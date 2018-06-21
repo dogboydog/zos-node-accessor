@@ -206,7 +206,14 @@ describe('Test cases for z/OS node accessor', function() {
         });
     });
 
-    var submittedJobId;
+    var submittedJobId,
+        jobStatusResp = '' +
+        'JOBNAME  JOBID    OWNER    STATUS CLASS\n' +
+        'UTHELLO __JOB_ID__ VPADEV   OUTPUT A        RC=0000\n' +
+        '--------\n' +
+        '       ID  STEPNAME PROCSTEP C DDNAME   BYTE-COUNT\n' +
+        '       001 JES2        N/A   H JESMSGLG      1584\n' +
+        '1 spool files';
     it('can submit JCL', function() {
         if(!TEST_ZOS) {
             var stub = sinon.stub(client.client, 'put', function (jcl, path, cb) {
@@ -218,10 +225,30 @@ describe('Test cases for z/OS node accessor', function() {
         var helloJCL = "//UTHELLO JOB (999,POK),'METAL',CLASS=A,MSGCLASS=H,NOTIFY=&SYSUID\r\n//STEP0001 EXEC PGM=IEBGENER\r\n//SYSIN    DD DUMMY\r\n//SYSPRINT DD SYSOUT=*\r\n//SYSUT1   DD *\r\nHELLO, WORLD\r\n/*\r\n//SYSUT2   DD SYSOUT=*\r\n//"
         return client.submitJCL(helloJCL).then(function (jobId) {
             submittedJobId = jobId;
+            jobStatusResp = jobStatusResp.replace('__JOB_ID__', submittedJobId);
             expect(jobId).to.match(/^\w+\d+$/);
         }).finally(function () {
             stub && stub.restore();
         });
+    });
+
+    it('can get job status', function(done) {
+        if(!TEST_ZOS) {
+            var listStub = sinon.stub(client.client, 'list').callsArgWith(1, null, jobStatusResp.split('\n'));
+        }
+        // Add a delay here so the submitted job can be queried
+        setTimeout(function() {
+            client.getJobStatus(submittedJobId).then(function (status) {
+                expect(status.spoolFiles.length).to.be.above(0);
+                expect(status.rc).to.be.equal(0);
+                expect(status.jobid).to.equal(submittedJobId);
+                done();
+            }).catch(function(err) {
+                done(err);
+            }).finally(function () {
+                listStub && listStub.restore();
+            })
+        }, TEST_ZOS ? 5000 : 0);
     });
 
     it('can get job log', function(done) {
@@ -229,18 +256,30 @@ describe('Test cases for z/OS node accessor', function() {
             var stream = require('stream');
             var bufferStream = new stream.PassThrough();
             bufferStream.end(new Buffer('MINUTES EXECUTION TIME\n!! END OF JES SPOOL FILE !!'));
-            var stub = sinon.stub(client.client, 'get').callsArgWith(1, null, bufferStream);
+            var getStub = sinon.stub(client.client, 'get').callsArgWith(1, null, bufferStream);
+            var listStub = sinon.stub(client.client, 'list').callsArgWith(1, null, jobStatusResp.split('\n'));
         }
         // Add a delay here so the submitted job can be queried
         setTimeout(function() {
-            client.getJobLog('UTHELLO', submittedJobId).then(function (log) {
-            stub && expect(stub.calledWith(submittedJobId+'.x')).to.be.true;
-            expect(log).to.include('!! END OF JES SPOOL FILE !!');
+            client.getJobLog('UTHELLO', submittedJobId, 'metaInfo').then(function (log) {
+            getStub && expect(getStub.calledWith(submittedJobId+'.x')).to.be.true;
+            expect(log.length).to.be.above(0);
+            if (TEST_ZOS) {
+                expect(log[0].content).to.be.a('string');
+                expect(log[0].ddname).to.be.a('string');
+                expect(log[0].stepname).to.be.a('string');
+            } else {
+                expect(log[0].content).to.equal('MINUTES EXECUTION TIME');
+                expect(log[0].ddname).to.equal('JESMSGLG');
+                expect(log[0].stepname).to.equal('JES2');
+                expect(log[0].byteCount).to.equal(1584);
+            }
             done();
         }).catch(function(err) {
             done(err);
         }).finally(function () {
-            stub && stub.restore();
+            getStub && getStub.restore();
+            listStub && listStub.restore();
         })
         }, TEST_ZOS ? 5000 : 0);
     });
